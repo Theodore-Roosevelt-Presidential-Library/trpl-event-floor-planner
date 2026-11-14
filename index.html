@@ -288,6 +288,7 @@ label.paste textarea{border:1px solid var(--line);background:var(--panel);border
       <span id="peers" hidden></span>
     </div>
     <div class="actions">
+      <a class="btn sa-top" id="fullLink" hidden href="https://claude.ai/artifact/1F3zc9qUzq3z1g3v8LQ6k1" target="_blank" rel="noopener" title="The AI tools, shared team layouts and live co-editing work on claude.ai">Open the full planner on claude.ai ↗</a>
       <button class="btn" id="newBtn" title="Start a new, blank layout in this room">New</button>
       <button class="btn" id="undoBtn" title="Undo (Ctrl+Z)">Undo</button>
       <button class="btn" id="redoBtn" title="Redo (Ctrl+Y)">Redo</button>
@@ -417,6 +418,8 @@ Raj Patel uses a wheelchair: seat near the entrance"></textarea>
 'use strict';
 const $ = s => document.querySelector(s);
 const DEG = Math.PI / 180;
+const FULL_URL = 'https://claude.ai/artifact/1F3zc9qUzq3z1g3v8LQ6k1';   // the full planner, with the AI tools and shared layouts
+const STANDALONE = !(window.claude && window.claude.use);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const r2 = v => Math.round(v * 100) / 100;
 function fmtFt(v){ v = Math.max(0, v); let f = Math.floor(v + 1e-6), i = Math.round((v - f) * 12); if (i === 12){ f++; i = 0; } return i ? `${f}′-${i}″` : `${f}′`; }
@@ -1683,7 +1686,8 @@ async function deleteLayout(id, btn){
 }
 function renderList(){
   const el = $('#layoutList'); if (!el) return;
-  $('#storeNote').textContent = db ? 'Layouts saved here are shared with everyone who can open this planner. An open layout saves itself as you work, and anyone else in it sees your changes live.' : 'Layouts are saved in this browser only. Open the planner on claude.ai to share them with your team.';
+  $('#storeNote').textContent = db ? 'Layouts saved here are shared with everyone who can open this planner. An open layout saves itself as you work, and anyone else in it sees your changes live.' : 'Layouts are saved in this browser only. Open the full planner on claude.ai to share them with your team.';
+  if (!db && STANDALONE) $('#storeNote').innerHTML = `Layouts are saved in this browser only. <a href="${FULL_URL}" target="_blank" rel="noopener">Open the full planner on claude.ai</a> to share them with your team and edit together.`;
   if (db && !dbLoaded){ el.innerHTML = `<p class="hint">Loading saved layouts…</p>`; return; }
   const L = [...layouts].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const here = {}; if (room) for (const p of room.peers()) if (!p.sameTab && p.presence && p.presence.lay) here[p.presence.lay] = (here[p.presence.lay] || 0) + 1;
@@ -3576,6 +3580,19 @@ function boot(){
 boot();
 
 const cl = window.claude;
+// Outside claude.ai (for example on the library's own website) there is no window.claude: point people to the full planner,
+// and save PNG and CSV files with an ordinary browser download.
+if (STANDALONE){
+  $('#fullLink').hidden = false;
+  const more = `<a href="${FULL_URL}" target="_blank" rel="noopener">Open the full planner on claude.ai</a>`;
+  $('#aiOff').innerHTML = `${more} to have Claude suggest a layout from a description.`;
+  $('#saOff').innerHTML = `${more} to use the seating assistant.`;
+  downloads = {save: async ({filename, data}) => {
+    const blob = data instanceof Blob ? data : new Blob([data], {type: /\.csv$/i.test(filename) ? 'text/csv;charset=utf-8' : 'application/octet-stream'});
+    const a = document.createElement('a'), url = URL.createObjectURL(blob); a.href = url; a.download = filename; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000); return {status: 'saved'}; }};
+  $('#exportBtn').hidden = false; renderGuests();
+}
 if (cl && cl.use){
   cl.use('db').then(d => {
     if (!d) return; db = d; layouts = []; renderList();
