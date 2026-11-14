@@ -1,0 +1,27 @@
+# TRPL Event Floor Planner
+
+An interactive, to-scale event floor planner for four spaces at the Theodore Roosevelt Presidential Library:
+
+- Main Lobby (W100)
+- White House Facade (W166)
+- Prefunction Space (Auditorium Lobby E100 + Prefunction E101)
+- The People's Library (W185)
+
+Drag tables, chairs, stages, bars and more onto a plan traced from the architectural drawings, check fit and aisle widths, assign seats, and walk through each room in a 3D view (day or night).
+
+## Running it
+
+It is a single self-contained page: open `index.html` in a browser, or serve it with GitHub Pages (Settings → Pages → deploy from the `main` branch).
+
+## What works where
+
+This page was built as a Claude artifact. Some features rely on capabilities that only exist when it is opened on claude.ai:
+
+| Feature | On claude.ai | Standalone (this repo) |
+|---|---|---|
+| Planning, fit checks, 3D view, seating by hand | Yes | Yes |
+| Saved layouts | Shared with your team, live co-editing | Saved in this browser only |
+| "Suggest a layout" and the Seating assistant (AI) | Yes | Not available |
+| PNG and CSV downloads | Yes | Not available |
+
+The 3D view loads three.js from cdnjs and jsDelivr, so it needs an internet connection.
