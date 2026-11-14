@@ -179,6 +179,11 @@ kbd{font-family:var(--f-mono);font-size:11px;border:1px solid var(--line);border
 .lrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .lrow b{display:block;font-weight:600;overflow-wrap:anywhere}
 .lrow .sub{display:block}
+.fullbar{flex-basis:100%;display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;background:var(--accent-soft);border:1px solid var(--accent);border-left-width:5px;border-radius:8px;padding:9px 12px;font-size:13.5px;line-height:1.35}
+.fullbar[hidden]{display:none}
+.fullbar .btn{font-size:14px;padding:8px 14px;font-weight:600;text-decoration:none;white-space:nowrap}
+.share-sec{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:6px}
+.share-sec p{margin:0}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--panel);padding:8px 14px;border-radius:6px;font-size:13px;z-index:30;pointer-events:none}
 
 /* ---- plan drawing (units are feet) ---- */
@@ -293,10 +298,12 @@ label.paste textarea{border:1px solid var(--line);background:var(--panel);border
       <button class="btn" id="undoBtn" title="Undo (Ctrl+Z)">Undo</button>
       <button class="btn" id="redoBtn" title="Redo (Ctrl+Y)">Redo</button>
       <button class="btn" id="layoutsBtn">Layouts</button>
+      <button class="btn" id="shareBtn" title="Share a link to this layout, or download it as a file with the seating report">Share</button>
       <button class="btn sa-top" data-sa-open title="Seat guests from a guest list with Claude">✦ Seating assistant</button>
       <button class="btn" id="exportBtn" hidden>Export PNG</button>
       <button class="btn primary" id="saveBtn">Save</button>
     </div>
+    <div class="fullbar" id="fullBar" hidden><span><b>You’re using the website copy of the planner.</b> Shared team layouts, live co-editing, “Suggest a layout” and the Seating assistant are in the full planner on claude.ai.</span><a class="btn primary" href="https://claude.ai/artifact/1F3zc9qUzq3z1g3v8LQ6k1" target="_blank" rel="noopener">Open the full planner on claude.ai ↗</a></div>
   </header>
 
   <aside class="lib" id="lib" aria-label="Furniture library"></aside>
@@ -375,6 +382,19 @@ label.paste textarea{border:1px solid var(--line);background:var(--panel);border
     <h2 id="newTitle">Save before starting a new layout?</h2>
     <p class="hint" id="newMsg" style="margin:0"></p>
     <div class="btnrow"><button class="btn primary" id="newSave">Save, then start new</button><button class="btn" id="newDiscard">Start new without saving</button><button class="btn" id="newCancel">Cancel</button></div>
+  </div>
+</div>
+<div class="overlay" id="shareDlg" hidden>
+  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="shareTitle" style="width:min(560px,100%)">
+    <div class="dlg-h"><h2 id="shareTitle">Share this layout</h2><button class="btn sm" id="shareClose">Close</button></div>
+    <div class="share-sec"><b>Share link</b><p class="hint">A link that opens a copy of this layout, with its seating and tags. It’s a snapshot: if you change the layout later, share a new link.</p>
+      <div class="btnrow"><button class="btn primary" id="shareMake">Create share link</button></div>
+      <div id="shareOut" hidden><input type="text" id="shareUrl" readonly class="sa-taginput" aria-label="Share link"><div class="btnrow" style="margin-top:6px"><button class="btn sm" id="shareCopy">Copy link</button></div><p class="hint" id="shareNote" style="margin-top:4px"></p></div></div>
+    <div class="share-sec"><b>Layout file</b><p class="hint">One file that opens in any web browser as a printable report: the setup, meal and allergy totals, every table’s seating with tags, and an A–Z guest list. It can also be loaded back into the planner.</p>
+      <div class="btnrow"><button class="btn" id="fileSave">Download layout file</button></div><p class="hint" id="fileOff" hidden>Downloads aren’t available in this view.</p></div>
+    <div class="share-sec"><b>Open a shared layout</b><p class="hint">Paste a share link, or choose a layout file. It opens as a new, unsaved plan; Undo brings back what you had.</p>
+      <div class="btnrow"><input type="text" id="openUrl" class="sa-taginput" placeholder="Paste a share link" aria-label="Share link to open" style="flex:1;width:auto;min-width:0"><button class="btn sm" id="openUrlGo">Open link</button></div>
+      <div class="btnrow"><label class="btn sm" for="openFile" style="cursor:pointer">Choose layout file…</label><input type="file" id="openFile" accept=".html,.htm,.json" hidden></div></div>
   </div>
 </div>
 <div class="overlay" id="seatDlg" hidden>
@@ -1628,6 +1648,7 @@ document.addEventListener('keydown', e => {
   if (mod && e.key.toLowerCase() === 's'){ e.preventDefault(); saveLayout(false); return; }
   if (mod) return;
   if (e.key === 'Escape' && !$('#newDlg').hidden){ closeNewDlg(); return; }
+  if (e.key === 'Escape' && !$('#shareDlg').hidden){ closeShareDlg(); return; }
   if (e.key === 'Escape' && !$('#seatDlg').hidden){ closeSeatDlg(); return; }
   if (e.key === 'Escape' && linkPick){ linkPick = null; renderInspector(); render(); return; }
   if (e.key === 'Escape'){ if (measureMode) setMeasure(false); else if (!$('#layoutsDlg').hidden) closeDlg(); else { selId = null; render(); renderInspector(); } return; }
@@ -3566,6 +3587,127 @@ function switchRoom(id, fromLayout){
 }
 $('#roomSel').addEventListener('change', e => switchRoom(e.target.value));
 
+/* ============ Sharing: a share link, and a layout file that reads as a seating report ============
+   Both carry a snapshot of the plan: room, name, furniture (with guests and tags) and the room's switches. Opening either
+   loads it as a new, unsaved plan in its room; Undo brings back what was there. A share link always points at the website
+   copy (or at whatever page it was made on, outside claude.ai), because claude.ai doesn't pass the address on to the page. */
+const SITE_URL = 'https://awynd.github.io/trpl-event-floor-planner/';
+const layoutData = () => ({app: 'trpl-floor-planner', v: 1, room: ROOM, name: curName(), fixed: fixedState, exported: new Date().toISOString(),
+  items: JSON.parse(JSON.stringify(items)).map(({rv, ...it}) => it)});
+const b64u = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 8192) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const unb64u = str => { str = str.replace(/-/g, '+').replace(/_/g, '/'); while (str.length % 4) str += '='; const s = atob(str); return Uint8Array.from(s, c => c.charCodeAt(0)); };
+async function packLayout(d){ const json = new TextEncoder().encode(JSON.stringify(d));
+  if (window.CompressionStream){ const st = new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw')); return 'z' + b64u(new Uint8Array(await new Response(st).arrayBuffer())); }
+  return 'j' + b64u(json); }
+async function unpackLayout(t){ const k = t[0], bytes = unb64u(t.slice(1)); let raw = bytes;
+  if (k === 'z'){ const st = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')); raw = new Uint8Array(await new Response(st).arrayBuffer()); }
+  else if (k !== 'j') throw new Error('unknown format');
+  return JSON.parse(new TextDecoder().decode(raw)); }
+// load a shared snapshot as a new, unsaved plan in its own room; everything in it is checked and cleaned first
+function loadLayoutData(d, how){
+  if (!d || d.app !== 'trpl-floor-planner' || !Array.isArray(d.items)) throw new Error('not a planner layout');
+  const room = ROOMS[d.room] ? d.room : 'lobby'; if (room !== ROOM) switchRoom(room, true);
+  const a = adopt(JSON.parse(JSON.stringify(d.items.slice(0, 600))), d.fixed), links = {};
+  const list = a.items.filter(it => isFinite(+it.x) && isFinite(+it.y)).map(it => {
+    const p = {...it.p}; if (typeof p.label !== 'string') p.label = ''; p.label = p.label.slice(0, 40);
+    p.guests = Array.isArray(p.guests) ? p.guests.map(g => String(g || '').slice(0, 60)) : [];
+    p.gtags = Array.isArray(p.gtags) ? p.gtags.map(ts => Array.isArray(ts) ? ts.map(t => String(t).slice(0, 40)).slice(0, 12) : []) : [];
+    const out = {id: newId(), type: it.type, x: r2(+it.x), y: r2(+it.y), rot: ((Math.round(+it.rot || 0) % 360) + 360) % 360, p};
+    if (it.link) out.link = links[it.link] || (links[it.link] = 'L' + newId());
+    return out; });
+  clearTimeout(live.timer); live.base = null; layoutId = null; isSample = false; $('#banner').hidden = true; selId = null; linkPick = null;
+  items = list; $('#layoutName').value = String(d.name || 'Shared layout').slice(0, 60); setEveryday(a.everyday, true); pruneLinks();
+  commit(); renderInspector(); userView = false; fit(); setDirty(true); saveDraft(); sendPresence(); renderPeerChips(); drawPeers();
+  toast(`Opened “${$('#layoutName').value}” from a ${how}. It’s a copy: press Save to keep it${db ? ' in the team’s layouts' : ''}.`);
+}
+// what the room's switches were set to, in words
+function fixedText(room, fx){
+  if (room === 'lobby') return [`Everyday admissions desks and counters: ${fx & 1 ? 'in place' : 'moved out'}`];
+  if (room === 'pf') return [`Coat check: ${fx & 1 ? 'open' : 'closed'}`, `Built-in bar: ${fx & 2 ? 'pulled out for service' : 'stowed against the wall'}`];
+  if (room === 'pl') return [`Timber benches and round seats: ${fx & 1 ? 'in place' : 'moved out'}`];
+  return []; }
+// the layout file: a printable report of the setup and every guest's table, seat and tags, with the layout itself tucked inside
+function layoutReportHtml(d){
+  const R = ROOMS[d.room] || ROOMS.lobby, list = d.items, seated = [], tables = [], counts = new Map();
+  const seats = list.reduce((s, it) => s + (T[it.type] && T[it.type].seats ? T[it.type].seats(it.p) : 0), 0);
+  for (const it of list){ if (it.type === 'person' || !T[it.type]) continue; const k = T[it.type].name(it.p); counts.set(k, (counts.get(k) || 0) + 1); }
+  const tName = it => { const l = String(it.p.label || ""); return !l ? T[it.type].name(it.p) : /^\d+$/.test(l) || !T[it.type].table ? itemName(it) : l; };
+  for (const it of list){ if (!SEATED.has(it.type) || (/regist|check.?in|gift|info|welcome|sign.?in|staff|press/i.test(it.p.label || "") && !(it.p.guests || []).some(g => String(g || "").trim()))) continue; const n = seatCount(it), g = it.p.guests || [], tg = it.p.gtags || [], rows = [];
+    for (let i = 0; i < n; i++){ const nm = String(g[i] || '').trim(), tags = nm ? (tg[i] || []) : []; rows.push({seat: i + 1, name: nm, tags}); if (nm) seated.push({name: nm, table: tName(it), seat: i + 1, tags}); }
+    tables.push({name: tName(it), kind: T[it.type].name(it.p), label: it.p.label || '', rows}); }
+  const num = l => /^\d+$/.test(l) ? +l : Infinity;
+  tables.sort((a, b) => num(a.label) - num(b.label) || a.name.localeCompare(b.name));
+  const tagHtml = ts => ts.map(t => isAllergy(t) ? `<span class="al">⚠ ${esc(allergyOf(t))} allergy</span>` : `<span class="tg">${esc(t)}</span>`).join(' ');
+  const full = tables.filter(t => t.rows.some(r => r.name)), empty = tables.filter(t => !t.rows.some(r => r.name));
+  const totals = tagTally(seated.map(g => g.tags)), allergies = totals.filter(([t]) => isAllergy(t)), meals = totals.filter(([t]) => !isAllergy(t));
+  const when = new Date(d.exported || Date.now()).toLocaleString([], {dateStyle: 'long', timeStyle: 'short'});
+  const json = JSON.stringify(d).replace(/</g, '\\u003c');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(d.name)} · ${esc(R.name)} seating</title>
+<style>
+body{margin:0;background:#f4f4f0;color:#1c2521;font:15px/1.45 -apple-system,"Segoe UI",Arial,sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 20px 48px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:18px;margin:28px 0 8px;border-bottom:2px solid #2e6a56;padding-bottom:4px}
+.sub{color:#5d6a64;font-size:13px}
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0}.facts span{background:#fff;border:1px solid #d3d9d5;border-radius:6px;padding:4px 10px;font-size:13px}
+ul{margin:6px 0;padding-left:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.card{background:#fff;border:1px solid #d3d9d5;border-radius:8px;padding:10px 12px;break-inside:avoid}
+.card h3{margin:0 0 2px;font-size:16px}.card .sub{margin-bottom:6px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}td{padding:3px 4px;border-top:1px solid #eceee9;vertical-align:top}td.n{width:22px;color:#5d6a64;text-align:right}
+.open{color:#9aa7a0;font-style:italic}
+.tg,.al{display:inline-block;font-size:11.5px;line-height:1.4;border-radius:999px;padding:0 7px;margin:1px 2px 1px 0;white-space:nowrap}
+.tg{border:1px solid #2e6a56;color:#2e6a56}.al{border:1px solid #c23b27;color:#c23b27;font-weight:600}
+.idx td{padding:4px 6px}.idx td:first-child{font-weight:600}
+.note{margin-top:32px;font-size:12.5px;color:#5d6a64;border-top:1px solid #d3d9d5;padding-top:10px}
+@media print{body{background:#fff}main{padding:0}.card{border-color:#999}h2{break-after:avoid}}
+</style></head><body><main>
+<h1>${esc(d.name)}</h1>
+<div class="sub">${esc(R.name)} ${esc(R.num)} · Theodore Roosevelt Presidential Library · exported ${esc(when)}</div>
+<div class="facts"><span><b>${seated.length}</b> guests seated</span><span><b>${seats}</b> seats in all</span><span><b>${tables.length}</b> tables and seating blocks</span>${fixedText(d.room, d.fixed).map(t => `<span>${esc(t)}</span>`).join('')}</div>
+<h2>Setup</h2><ul>${[...counts].map(([k, v]) => `<li>${v} × ${esc(k)}</li>`).join('') || '<li>No furniture placed.</li>'}</ul>
+${totals.length ? `<h2>Meals, pairings and allergies</h2>${meals.length ? `<p>${meals.map(([t, c]) => `<span class="tg">${esc(t)}</span> <b>${c}</b>`).join(' &nbsp; ')}</p>` : ''}
+${allergies.length ? `<p><b>Allergies</b></p><ul>${allergies.map(([t, c]) => `<li><span class="al">⚠ ${esc(allergyOf(t))}</span> ${c}: ${seated.filter(g => g.tags.includes(t)).map(g => `${esc(g.name)} (${esc(g.table)}, seat ${g.seat})`).join('; ')}</li>`).join('')}</ul>` : ''}` : ''}
+<h2>Seating by table</h2>
+${full.length ? `<div class="grid">${full.map(t => `<div class="card"><h3>${esc(t.name)}</h3><div class="sub">${esc(t.kind)} · ${t.rows.filter(r => r.name).length} of ${t.rows.length} seats filled</div><table>${t.rows.map(r => `<tr><td class="n">${r.seat}</td><td>${r.name ? esc(r.name) : '<span class="open">open</span>'}</td><td>${tagHtml(r.tags)}</td></tr>`).join('')}</table></div>`).join('')}</div>` : '<p>No seats have been assigned yet.</p>'}
+${empty.length ? `<p class="sub">No one seated at: ${empty.map(t => esc(t.name)).join(', ')}.</p>` : ''}
+${seated.length ? `<h2>Guests A–Z</h2><table class="idx">${[...seated].sort((a, b) => a.name.localeCompare(b.name)).map(g => `<tr><td>${esc(g.name)}</td><td>${esc(g.table)}, seat ${g.seat}</td><td>${tagHtml(g.tags)}</td></tr>`).join('')}</table>` : ''}
+<p class="note">Made with the TRPL Event Floor Planner. To edit this layout, open the planner, choose <b>Share</b>, then <b>Choose layout file</b>, and pick this file.</p>
+</main><script type="application/json" id="trpl-layout">${json}<\/script></body></html>`;   // <\/script>: a literal closing tag would end this page's own script
+}
+function openShareDlg(){ $('#shareDlg').hidden = false; $('#shareOut').hidden = true; $('#fileOff').hidden = !!downloads; $('#fileSave').disabled = !downloads; $('#shareMake').focus(); }
+function closeShareDlg(){ $('#shareDlg').hidden = true; $('#shareBtn').focus(); }
+$('#shareBtn').addEventListener('click', openShareDlg);
+$('#shareClose').addEventListener('click', closeShareDlg);
+$('#shareDlg').addEventListener('click', e => { if (e.target.id === 'shareDlg') closeShareDlg(); });
+$('#shareDlg').addEventListener('keydown', e => { if (e.key === 'Escape'){ e.stopPropagation(); closeShareDlg(); } });
+$('#shareMake').addEventListener('click', async () => {
+  try { const base = STANDALONE ? location.origin + location.pathname : SITE_URL, url = base + '#layout=' + await packLayout(layoutData());
+    $('#shareUrl').value = url; $('#shareOut').hidden = false; $('#shareUrl').select();
+    $('#shareNote').textContent = (url.length > 30000 ? 'This layout is large, so the link is very long; some email programs may cut it off. If it doesn’t open, send the layout file instead. ' : '')
+      + (STANDALONE ? '' : 'The link opens the website copy of the planner, so it works for anyone, signed in or not. To bring it back here, paste it under “Open a shared layout”.');
+  } catch (e){ toast('Couldn’t make a share link just now.'); } });
+$('#shareCopy').addEventListener('click', async () => { const v = $('#shareUrl').value;
+  try { await navigator.clipboard.writeText(v); toast('Share link copied.'); }
+  catch (e){ $('#shareUrl').select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e2){} toast(ok ? 'Share link copied.' : 'Press Ctrl+C (or ⌘C) to copy the selected link.'); } });
+$('#fileSave').addEventListener('click', async () => { if (!downloads) return; const d = layoutData();
+  const slug = (d.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'layout') + '-' + ({wh: 'white-house-facade', pf: 'prefunction-space', pl: 'peoples-library'}[d.room] || 'main-lobby');
+  try { await downloads.save({filename: slug + '-layout.html', data: layoutReportHtml(d)}); toast('Layout file saved. Open it in any browser to read or print the seating.'); }
+  catch (e){ if (!e || e.code !== 'declined') toast('That file couldn’t be saved.'); } });
+$('#openUrlGo').addEventListener('click', async () => { const v = $('#openUrl').value.trim(), i = v.indexOf('#layout=');
+  if (i < 0) return toast('That doesn’t look like a share link. It should contain “#layout=”.');
+  try { loadLayoutData(await unpackLayout(v.slice(i + 8)), 'share link'); $('#openUrl').value = ''; closeShareDlg(); } catch (e){ toast('That share link couldn’t be read. Ask for a new one.'); } });
+$('#openFile').addEventListener('change', async e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return;
+  try { const text = await f.text(); let d;
+    if (/^\s*\{/.test(text)) d = JSON.parse(text);
+    else { const sc = new DOMParser().parseFromString(text, 'text/html').querySelector('script#trpl-layout'); if (!sc) throw new Error('no layout'); d = JSON.parse(sc.textContent); }
+    loadLayoutData(d, 'layout file'); closeShareDlg(); }
+  catch (err){ toast('That file isn’t a planner layout file.'); } });
+// a page opened from a share link loads the layout it carries
+function loadFromHash(){ if (!/^#layout=/.test(location.hash)) return;
+  unpackLayout(location.hash.slice(8)).then(d => { loadLayoutData(d, 'share link'); try { history.replaceState(null, '', location.pathname + location.search); } catch (e){} })
+    .catch(() => toast('That share link couldn’t be read. Ask for a new one.')); }
+
 /* ============ Boot ============ */
 function boot(){
   const pf = store.get('trpl-lobby-prefs'); if (pf) Object.assign(prefs, pf);
@@ -3583,7 +3725,7 @@ const cl = window.claude;
 // Outside claude.ai (for example on the library's own website) there is no window.claude: point people to the full planner,
 // and save PNG and CSV files with an ordinary browser download.
 if (STANDALONE){
-  $('#fullLink').hidden = false;
+  $('#fullLink').hidden = false; $('#fullBar').hidden = false;
   const more = `<a href="${FULL_URL}" target="_blank" rel="noopener">Open the full planner on claude.ai</a>`;
   $('#aiOff').innerHTML = `${more} to have Claude suggest a layout from a description.`;
   $('#saOff').innerHTML = `${more} to use the seating assistant.`;
@@ -3616,6 +3758,7 @@ if (cl && cl.use){
   cl.use('downloads').then(d => { if (d){ downloads = d; $('#exportBtn').hidden = false; renderGuests(); } }).catch(() => {});
   cl.use('sample').then(s => { if (s){ sampleFn = s; $('#aiBox').hidden = false; $('#aiOff').hidden = true; } }).catch(() => {});
 }
+loadFromHash();
 })();
 </script>
 

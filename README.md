@@ -26,4 +26,13 @@ This page was built as a Claude artifact. Some features rely on capabilities tha
 
 When the page is opened outside claude.ai, an **Open the full planner on claude.ai** button appears in the header, and the AI tools and Layouts dialog link there too, so staff can switch to the full version with shared layouts and the AI tools (they need to be signed in to claude.ai).
 
+## Sharing layouts
+
+The **Share** button in the header works on both versions:
+
+- **Share link**: a link that opens a copy of the layout, with its seating and tags. Links always open this website copy; paste one under *Open a shared layout* to bring it into the claude.ai version.
+- **Layout file**: one HTML file that opens in any browser as a printable seating report (setup, meal and allergy totals, every table's seating with tags, and an A–Z guest list), and can be loaded back into the planner with *Choose layout file*.
+
+Both are snapshots: they don't update when the layout changes later.
+
 The 3D view loads three.js from cdnjs and jsDelivr, so it needs an internet connection.
