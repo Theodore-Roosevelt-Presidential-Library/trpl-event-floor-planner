@@ -22,7 +22,7 @@ This page was built as a Claude artifact. Some features rely on capabilities tha
 | Planning, fit checks, 3D view, seating by hand | Yes | Yes |
 | Saved layouts | Shared with your team, live co-editing | Saved in this browser only |
 | "Suggest a layout" and the Seating assistant (AI) | Yes | Not available |
-| PNG, seating chart and CSV downloads | Yes | Yes (ordinary browser download) |
+| PNG, seating chart (poster and letter-size print) and CSV downloads | Yes | Yes (ordinary browser download) |
 
 When the page is opened outside claude.ai, an **Open the full planner on claude.ai** button appears in the header, and the AI tools and Layouts dialog link there too, so staff can switch to the full version with shared layouts and the AI tools (they need to be signed in to claude.ai).
 

@@ -1170,7 +1170,7 @@ function itemMarkup(it, opts = {}){
   s += t.draw(it.p, it.rot);
   // guest names sit just outside each chair; shown when zoomed in close enough to read, and always on the exported sheet
   const g = it.p.guests;
-  if (g && g.some(Boolean) && (opts.exp || ppf() >= 11)){
+  if (g && g.some(Boolean) && !opts.noNames && (opts.exp || ppf() >= 11)){
     // names stack first name over last name, and shrink to fit the space between neighbouring chairs so they don't run together
     const spots = chairSpots(it.type, it.p);
     const room = i => spots.reduce((m, [x2, y2], j) => j === i ? m : Math.min(m, Math.hypot(x2 - spots[i][0], y2 - spots[i][1])), 9);
@@ -1597,7 +1597,7 @@ function renderGuests(){
   $('#guestResults').innerHTML = `<p class="hint" style="margin:6px 0 4px">${list.length} ${list.length === 1 ? 'guest' : 'guests'} seated · ${open} open ${open === 1 ? 'seat' : 'seats'}. Select a table to assign seats.</p>`
     + (tally ? `<p class="hint" style="margin:0 0 4px">${tally}</p>` : '')
     + (q ? (hits.length ? `<ul class="issues">${hits.slice(0, 12).map(g => `<li><button data-goto="${g.id}"><span><b>${esc(g.name)}</b> · ${esc(g.where)}${g.tags.length ? ' ' + g.tags.map(tagChip).join(' ') : ''}</span></button></li>`).join('')}</ul>${hits.length > 12 ? `<p class="hint">and ${hits.length - 12} more</p>` : ''}` : `<p class="hint">No seated guest or tag matches “${esc(q)}”.</p>`) : '')
-    + (list.length && downloads ? `<div class="btnrow" style="margin-top:6px"><button class="btn sm primary" id="guestChart" title="The plan with every guest’s name, and their tags as coded badges on their chair, with a key">Download seating chart (PNG)</button><button class="btn sm" id="guestCsv">Download seating list (CSV)</button></div>` : '');
+    + (list.length && downloads ? `<div class="btnrow" style="margin-top:6px"><button class="btn sm primary" id="guestPrint" title="Pages laid out for 8.5×11 paper: the room and key, every table with names and tag badges at reading size, and the allergy list">Print seating chart (letter)</button><button class="btn sm" id="guestChart" title="The plan with every guest’s name, and their tags as coded badges on their chair, with a key">Seating chart poster (PNG)</button><button class="btn sm" id="guestCsv">Download seating list (CSV)</button></div>` : '');
 }
 // table, seat, guest and one column per tag: handy for the kitchen and the bar
 async function downloadSeatingCsv(){
@@ -1608,7 +1608,7 @@ async function downloadSeatingCsv(){
   try { await downloads.save({filename: (($('#layoutName').value.trim() || 'seating').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'seating') + '-seating.csv', data: rows.join('\r\n')}); }
   catch (e){ if (e && e.code !== 'declined') toast('That file couldn’t be saved.'); }
 }
-$('#guestResults').addEventListener('click', e => { if (e.target.closest('#guestCsv')) downloadSeatingCsv(); if (e.target.closest('#guestChart')) exportSeatingChart(); });
+$('#guestResults').addEventListener('click', e => { if (e.target.closest('#guestCsv')) downloadSeatingCsv(); if (e.target.closest('#guestChart')) exportSeatingChart(); if (e.target.closest('#guestPrint')) downloadPrintChart(); });
 $('#guestFind').addEventListener('input', renderGuests);
 $('#guestPanel').addEventListener('click', e => { const b = e.target.closest('[data-goto]'); if (!b) return; selId = b.dataset.goto; const it = sel();
   if (it){ seatOpen = true; if (mode3d && X){ X.controls.target.set(it.x, 0, it.y); } else { view.cx = it.x; view.cy = it.y; view.s = Math.max(view.s, 14); userView = true; applyView(); } }
@@ -1895,7 +1895,12 @@ svg.addEventListener('pointerleave', () => { if (room) room.presence({cur: null}
 
 /* ============ Seating chart: the plan with every guest's name, and their tags as coded badges on their chair ============ */
 // a short code for each tag: initials first ("WP" for wine pairing), then the first letters, kept unique
-function tagCodes(tags){ const used = new Set(), out = new Map();
+// charts give every tag on the page its own colour, most-used tag first, from a set chosen to stay apart on paper.
+// None is red, so no meal colour can be mistaken for an allergy.
+const CHART_COLORS = ['#2f6f9a', '#3e8a4f', '#7a3b6e', '#c9890e', '#5d6a64', '#1c9a9a', '#8a5a2b', '#b0447e', '#26364a', '#7d8f2a', '#5b4bb0', '#b5703b'];
+let chartCol = new Map();
+function tagCodes(tags){ const used = new Set(), out = new Map(), cols = new Set(); chartCol = new Map();
+  for (const t of tags){ if (isAllergy(t)) continue; const c = CHART_COLORS.find(x => !cols.has(x)) || tagColor(t); cols.add(c); chartCol.set(t, c); }
   for (const t of tags){ const base = (isAllergy(t) ? allergyOf(t) : t).trim(), words = base.split(/[\s-]+/).filter(Boolean), cap = c => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
     const cands = [words.map(w => w[0]).join('').slice(0, 2).toUpperCase(), cap(base.slice(0, 2)), cap(base.slice(0, 3))].filter(Boolean);
     let c = cands.find(x => !used.has(x)); for (let i = 2; !c; i++) if (!used.has(cands[0] + i)) c = cands[0] + i;
@@ -1904,7 +1909,7 @@ function tagCodes(tags){ const used = new Set(), out = new Map();
 // one badge: round and in the tag's colour for meals and pairings, square and red for allergies, with its code in white
 function badge(cx, cy, r, t, code){ const al = isAllergy(t);
   return (al ? `<rect x="${r2(cx - r)}" y="${r2(cy - r)}" width="${r2(r*2)}" height="${r2(r*2)}" rx="${r2(r*.3)}" fill="${LIGHT.warn}" stroke="#fff" stroke-width="${r2(r*.18)}"/>`
-             : `<circle cx="${r2(cx)}" cy="${r2(cy)}" r="${r2(r)}" fill="${tagColor(t)}" stroke="#fff" stroke-width="${r2(r*.18)}"/>`)
+             : `<circle cx="${r2(cx)}" cy="${r2(cy)}" r="${r2(r)}" fill="${chartCol.get(t) || tagColor(t)}" stroke="#fff" stroke-width="${r2(r*.18)}"/>`)
     + `<text x="${r2(cx)}" y="${r2(cy + r*.36)}" style="font:700 ${r2(r*(code.length > 2 ? .82 : 1.05))}px Arial,sans-serif;fill:#fff;text-anchor:middle">${esc(code)}</text>`; }
 // a row of badges centred on the chair, kept upright
 function seatBadges(x, y, rot, tags, codes){ const ts = tags.filter(t => codes.has(t)); if (!ts.length) return '';
@@ -1943,6 +1948,83 @@ async function exportSeatingChart(){
   } catch (e){ if (!e || e.code !== 'declined') toast('Couldn’t make the seating chart.'); }
   finally { URL.revokeObjectURL(url); }
 }
+
+/* ============ Printable seating chart, laid out for 8.5×11 paper ============
+   Page 1: the room with big table numbers, and the key. Then every seated table as a card: a small diagram with numbered
+   seats (allergy seats ringed in red) beside a list of seat, guest and tag badges at reading size. Then the allergy list.
+   One HTML file: open it in any browser and print it at letter size. */
+function printBadges(tags, codes){ return tags.filter(t => codes.has(t)).map(t => `<span class="p-b${isAllergy(t) ? ' p-al' : ''}" style="background:${isAllergy(t) ? LIGHT.warn : chartCol.get(t) || tagColor(t)}">${esc(codes.get(t))}</span>`).join(''); }
+function printTableDiagram(it){
+  const t = T[it.type], sh = t.shape(it.p), b = sh.kind === 'circle' ? {x0:-sh.r, y0:-sh.r, x1:sh.r, y1:sh.r} : sh, m = .5, w = b.x1 - b.x0 + 2*m, h = b.y1 - b.y0 + 2*m;
+  const W = 1.5, H = Math.min(2.1, W*h/w), g = it.p.guests || [];
+  const nums = chairSpots(it.type, it.p).map(([x, y], i) => { const has = String(g[i] || '').trim(), al = has && seatTags(it, i).some(isAllergy);
+    return `<circle cx="${r2(x)}" cy="${r2(y)}" r=".66" fill="${has ? '#fff' : '#e9ebe7'}" stroke="${al ? LIGHT.warn : LIGHT.itemstroke}" stroke-width="${al ? .2 : .07}"/><text x="${r2(x)}" y="${r2(y + .27)}" style="font:700 .76px Arial,sans-serif;text-anchor:middle;fill:${has ? '#1c2521' : '#8a948f'}">${i + 1}</text>`; }).join('');
+  return `<svg class="p-dia" viewBox="${r2(b.x0 - m)} ${r2(b.y0 - m)} ${r2(w)} ${r2(h)}" width="${W}in" height="${r2(H)}in">${t.draw({...it.p, label: it.p.label || ''}, 0)}${nums}</svg>`; }
+function printSeatingChartHtml(){
+  const {list} = allGuests(), tally = tagTally(list.map(g => g.tags)), codes = tagCodes(tally.map(([t]) => t));
+  const name = $('#layoutName').value.trim() || 'Untitled layout', R = ROOMS[ROOM], B = R.bounds, when = new Date().toLocaleDateString([], {dateStyle: 'long'});
+  const tName = it => { const l = String(it.p.label || ''); return !l ? T[it.type].name(it.p) : /^\d+$/.test(l) || !T[it.type].table ? itemName(it) : l; };
+  const tables = items.filter(it => SEATED.has(it.type) && (it.p.guests || []).some(g => String(g || '').trim()));
+  const num = l => /^\d+$/.test(l) ? +l : Infinity; tables.sort((a, b) => num(String(a.p.label || '')) - num(String(b.p.label || '')) || tName(a).localeCompare(tName(b)));
+  // page 1: the room, scaled to the page, with a large number on every seated table so it can be found on the floor
+  const W = B.x1 - B.x0, H = B.y1 - B.y0, sc = Math.min(4.6/W, 7.4/H), k = 1/sc;
+  const marks = tables.map(it => { const l = String(it.p.label || '').slice(0, 3) || '•';
+    return `<circle cx="${r2(it.x)}" cy="${r2(it.y)}" r="${r2(.15*k)}" fill="#1c2521" stroke="#fff" stroke-width="${r2(.02*k)}"/><text x="${r2(it.x)}" y="${r2(it.y + .055*k)}" style="font:700 ${r2((l.length > 2 ? .11 : .15)*k)}px Arial,sans-serif;fill:#fff;text-anchor:middle">${esc(l)}</text>`; }).join('');
+  const plan = `<svg class="p-plan" viewBox="${B.x0} ${B.y0} ${W} ${H}" width="${r2(W*sc)}in" height="${r2(H*sc)}in"><style>${exportCss()}.L-grid{display:none}</style>${staticMarkup()}${[...fixedItems(), ...items].map(it => itemMarkup(it, {exp: true, noNames: true})).join('')}${marks}</svg>`;
+  const key = tally.length ? tally.map(([t, n]) => `<tr><td>${printBadges([t], codes)}</td><td>${esc(isAllergy(t) ? allergyOf(t) + ' allergy' : t)}</td><td class="p-n">${n}</td></tr>`).join('') : '<tr><td colspan="3" class="p-mut">No guests have tags yet.</td></tr>';
+  const fx = fixedText(ROOM, fixedState);
+  // the tables: a card each; long chair-row blocks get a full-width card with the seats in columns
+  const cards = tables.map(it => { const g = it.p.guests || [], n = seatCount(it), rows = [], big = it.type === 'rows';
+    for (let i = 0; i < n; i++){ const nm = String(g[i] || '').trim(); if (!nm && big) continue;
+      rows.push(`<tr${nm ? '' : ' class="p-open"'}><td class="p-n">${i + 1}</td><td class="p-nm">${nm ? esc(nm) : 'open'}</td><td class="p-tg">${nm ? printBadges(seatTags(it, i), codes) : ''}</td></tr>`); }
+    const filled = g.slice(0, n).filter(s => String(s || '').trim()).length;
+    return `<section class="p-card${big ? ' p-wide' : ''}"><h3>${esc(tName(it))}</h3><div class="p-sub">${esc(T[it.type].name(it.p))} · ${filled} of ${n} seats filled</div>
+      <div class="p-body">${big ? '' : printTableDiagram(it)}<table class="p-seats">${rows.join('')}</table></div></section>`; }).join('');
+  const allergies = tally.filter(([t]) => isAllergy(t));
+  const allergyHtml = allergies.length ? allergies.map(([t]) => `<h3>${printBadges([t], codes)} ${esc(allergyOf(t))}</h3><table class="p-seats p-alist">${list.filter(g => g.tags.includes(t)).map(g => `<tr><td class="p-nm">${esc(g.name)}</td><td>${esc(g.table)}, seat ${g.seat}</td><td class="p-tg">${printBadges(g.tags, codes)}</td></tr>`).join('')}</table>`).join('') : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(name)} · seating chart</title>
+<style>
+@page{size:letter portrait;margin:.45in}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{margin:0;background:#e6e8e3;color:#1c2521;font:10.5pt/1.3 Arial,Helvetica,sans-serif}
+.p-page{width:8.5in;min-height:11in;margin:.25in auto;background:#fff;padding:.45in;box-shadow:0 1px 6px rgba(0,0,0,.15)}
+.p-page+.p-page{break-before:page}
+h1{font-size:20pt;margin:0 0 2pt}h2{font-size:14pt;margin:0 0 8pt;border-bottom:2pt solid #2e6a56;padding-bottom:3pt}h3{font-size:12pt;margin:0}
+.p-mut,.p-sub{color:#5d6a64;font-size:9pt}
+.p-top{display:flex;gap:.25in;align-items:flex-start;margin-top:10pt}
+.p-key{flex:1;min-width:0}.p-key table{border-collapse:collapse;width:100%}.p-key td{padding:3pt 4pt;border-bottom:1px solid #e3e6e1;font-size:11pt}
+.p-n{text-align:right;font-weight:700;width:1%;white-space:nowrap}
+.p-b{display:inline-flex;align-items:center;justify-content:center;min-width:19pt;height:19pt;padding:0 3pt;margin:1pt 2pt 1pt 0;border-radius:50%;color:#fff;font:700 9pt Arial,sans-serif;vertical-align:middle;border:1.5pt solid #fff;box-shadow:0 0 0 .6pt rgba(0,0,0,.35)}
+.p-b.p-al{border-radius:3pt}
+.p-facts{margin:8pt 0 0;padding:0;list-style:none;font-size:9.5pt;color:#5d6a64}
+.p-grid{display:grid;grid-template-columns:1fr 1fr;gap:.16in}
+.p-card{border:1pt solid #c9cfca;border-radius:6pt;padding:7pt 8pt;break-inside:avoid}
+.p-card.p-wide{grid-column:1/-1}.p-card.p-wide .p-seats{columns:3;display:block}.p-card.p-wide tr{display:flex;align-items:center;break-inside:avoid}
+.p-body{display:flex;gap:7pt;align-items:flex-start;margin-top:5pt}.p-dia{flex:none}
+.p-seats{border-collapse:collapse;flex:1;min-width:0}.p-seats td{padding:2pt 3pt;border-bottom:1px solid #eceee9;vertical-align:middle}
+.p-seats .p-nm{font-size:11pt;font-weight:600}.p-tg{white-space:nowrap}.p-open td{color:#9aa39e;font-style:italic;font-weight:400}
+.p-alist{width:100%;margin:4pt 0 12pt}
+.p-noprint{position:fixed;top:12px;right:12px;font:600 14px Arial;padding:10px 16px;border-radius:6px;border:0;background:#2e6a56;color:#fff;cursor:pointer}
+@media print{body{background:#fff}.p-page{margin:0;width:auto;min-height:0;padding:0;box-shadow:none}.p-noprint{display:none}}
+</style></head><body>
+<button class="p-noprint" onclick="print()">Print (letter, 100%)</button>
+<div class="p-page">
+<h1>${esc(name)}</h1><div class="p-mut">Seating chart · ${esc(R.name)} ${esc(R.num)} · Theodore Roosevelt Presidential Library · ${list.length} guests seated · ${esc(when)}</div>
+<div class="p-top">${plan}<div class="p-key"><h2>Key</h2><p class="p-mut" style="margin:-4pt 0 6pt">Each guest’s tags appear as badges beside their name on the table pages. Red squares are allergies.</p><table>${key}</table>
+${fx.length ? `<ul class="p-facts">${fx.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}<p class="p-mut" style="margin-top:8pt">Black circles on the plan mark the tables with guests; their numbers match the table pages.</p></div></div>
+</div>
+<div class="p-page"><h2>Tables</h2><div class="p-grid">${cards || '<p class="p-mut">No one is seated yet.</p>'}</div></div>
+${allergyHtml ? `<div class="p-page"><h2>⚠ Allergies</h2>${allergyHtml}</div>` : ''}
+</body></html>`;
+}
+async function downloadPrintChart(){
+  if (!downloads) return;
+  if (!allGuests().list.length) return toast('Seat some guests first: the seating chart shows each guest and their tags.');
+  const name = $('#layoutName').value.trim() || 'layout';
+  try { await downloads.save({filename: name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') + '-' + ({wh: 'white-house-facade', pf: 'prefunction-space', pl: 'peoples-library'}[ROOM] || 'main-lobby') + '-seating-chart-print.html', data: printSeatingChartHtml()});
+    toast('Saved. Open the file in your browser and print it on letter paper at 100%, in colour.'); }
+  catch (e){ if (!e || e.code !== 'declined') toast('That file couldn’t be saved.'); } }
 
 /* ============ PNG export ============ */
 const LIGHT = {bg:'#EEF0EC', panel:'#FFFFFF', ink:'#1C2521', muted:'#5D6A64', line:'#D3D9D5', accent:'#2E6A56', floor:'#FBFBF7', wall:'#232D29', glass:'#5C8FA6', grid:'#E6E9E3', grid5:'#D2D8D1', itemfill:'#FFFFFF', itemstroke:'#2A3530', chair:'#C7A96E', stage:'#E6DFCD', dance:'#E3E9EE', sel:'#D2771F', warn:'#C23B27', tight:'#C98A0B', ref:'#9AA7A0', vest:'#E7EAE5', timber:'#CDA57A'};
