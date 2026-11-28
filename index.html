@@ -1583,9 +1583,11 @@ $('#selPanel').addEventListener('click', e => {
 });
 
 /* ============ Guest finder ============ */
+// tables in number order (1, 2 ... 10), then any with a name, then unlabelled ones, so lists read the way the room is numbered
+const byTableLabel = (a, b) => { const la = String(a.p.label || ''), lb = String(b.p.label || ''); return (!la) - (!lb) || la.localeCompare(lb, undefined, {numeric: true}); };
 function allGuests(){
   const out = []; let open = 0;
-  for (const it of items){ if (!SEATED.has(it.type)) continue; const n = seatCount(it), g = it.p.guests || [];
+  for (const it of [...items].sort(byTableLabel)){ if (!SEATED.has(it.type)) continue; const n = seatCount(it), g = it.p.guests || [];
     for (let i = 0; i < n; i++){ const nm = (g[i] || '').trim(); if (nm) out.push({name: nm, id: it.id, table: itemName(it), seat: i + 1, tags: seatTags(it, i), where: `${itemName(it)}, seat ${i + 1}`}); else open++; } }
   return {list: out, open};
 }
@@ -3437,7 +3439,7 @@ function parseGuests(text){
   return parties;
 }
 // guest tables only: a table labelled for registration, check-in, gifts or the like isn't for seating guests
-const seatTables = () => items.filter(it => SEATED.has(it.type) && seatCount(it) > 0 && !/regist|check.?in|gift|info|welcome|sign.?in|staff|press/i.test(it.p.label || ''));
+const seatTables = () => items.filter(it => SEATED.has(it.type) && seatCount(it) > 0 && !/regist|check.?in|gift|info|welcome|sign.?in|staff|press/i.test(it.p.label || '')).sort(byTableLabel);
 function seatOrderText(it){ return it.type === 'round' ? 'seats numbered clockwise; consecutive numbers sit side by side and the last seat is beside seat 1'
   : it.type === 'banquet' ? (it.p.seating === 'one' ? 'seats along one side, left to right' : 'seats run along the first long side, then the opposite side, then the ends; consecutive numbers on a side sit side by side and seats facing each other are across the table')
   : `${it.p.rows} rows of ${it.p.cols}, numbered left to right, front row first`; }
@@ -3506,7 +3508,7 @@ function checkSeating(parties, tables, assignments){
   const where = new Map(), seatOf = new Map(), problems = [], fixed = new Set();
   tables.forEach((t, i) => (t.fixed || []).forEach((nm, s) => { if (nm){ fixed.add(i + ':' + s); } }));
   for (const a of Array.isArray(assignments) ? assignments : []){
-    const ti = Number(a && a.table), t = tables[ti]; if (!t){ problems.push(`Unknown table ${a && a.table}.`); continue; }
+    const ti = a && a.table, t = Number.isInteger(ti) ? tables[ti] : null; if (!t){ problems.push(`Unknown table “${a && (a.asked ?? a.table)}”: use a table name exactly as listed.`); continue; }
     const seats = Array.isArray(a.seats) ? a.seats : [];
     if (seats.length > t.seats) problems.push(`Table ${t.name} has ${t.seats} seats but ${seats.length} were assigned.`);
     seats.forEach((nm, s) => { nm = String(nm || '').trim(); if (!nm) return; const hit = all.get(nm.toLowerCase());
@@ -3567,11 +3569,21 @@ function linkedBriefs(list, nameOf){
     sets.push({tables: idxs.map(nameOf), side_1_in_order: order(side1), side_2_in_order: order(side2), true_end_seats: ends, join_seats_mid_table: joins}); }
   return {sets, notes, partOf};
 }
-// tables as Claude sees them: index, name, type, seats, centre, how seats are numbered, what's nearby, and anyone already seated there
+// tables as Claude sees them: name, type, seats, centre, how seats are numbered, what's nearby, and anyone already seated there.
+// Claude answers by table NAME ("4" for Table 4). An earlier version also sent a 0-based position, and "table 4" kept landing on the 5th table.
+function uniqueNames(names){ const seen = new Map();
+  return names.map(n => { n = String(n); const k = (seen.get(n) || 0) + 1; seen.set(n, k); return k === 1 ? n : `${n} (${k})`; }); }
+// turn the table names in an answer back into positions in `tables`; a name that matches nothing becomes -1 (no table), keeping what was asked for in `asked`
+function resolveTables(tables, list){
+  const norm = v => String(v ?? '').trim().replace(/^table\s+/i, '').toLowerCase();
+  return (Array.isArray(list) ? list : []).map(a => { if (!a || typeof a !== 'object') return a;
+    const want = norm(a.table), i = tables.findIndex(t => norm(t.name) === want);
+    return i >= 0 ? {...a, table: i} : {...a, table: -1, asked: a.table}; }); }
 function saTableBrief(list, keepExisting, feats = []){
+  const names = uniqueNames(list.map((it, i) => it.p.label ? String(it.p.label) : `T${i + 1}`));
   return list.map((it, i) => { const n = seatCount(it), g = keepExisting ? (it.p.guests || []).slice(0, n).map(s => (s || '').trim()) : [];
     const near = feats.map(f => ({what: f.what, feet: Math.round(distTo(f.shape, it.x, it.y))})).filter(f => f.feet <= 25).sort((a, b) => a.feet - b.feet).slice(0, 5);
-    return {table: i, name: it.p.label ? String(it.p.label) : `T${i + 1}`, type: T[it.type].name(it.p), seats: n, x: r2(it.x), y: r2(it.y), seat_order: seatOrderText(it), ...(near.length ? {nearby: near} : {}), together_seats: pairSeats(it).map(([a, b]) => [a + 1, b + 1]), ...(g.some(Boolean) ? {already_seated: g.map(s => s || null)} : {}), ...(isPinned(it) ? {locked: true} : {})}; }); }
+    return {name: names[i], type: T[it.type].name(it.p), seats: n, x: r2(it.x), y: r2(it.y), seat_order: seatOrderText(it), ...(near.length ? {nearby: near} : {}), together_seats: pairSeats(it).map(([a, b]) => [a + 1, b + 1]), ...(g.some(Boolean) ? {already_seated: g.map(s => s || null)} : {}), ...(isPinned(it) ? {locked: true} : {})}; }); }
 function saStatus(msg, cls = ''){ const s = $('#saStatus'); s.textContent = msg; s.className = 'ai-status ' + cls; }
 function saBusy(on){ $('#saGo').disabled = on; $('#saStop').hidden = !on; $('#saGuests').disabled = on; $('#saReq').disabled = on; }
 async function suggestSeating(){
@@ -3598,24 +3610,23 @@ async function suggestSeating(){
     `RULES, in priority order: (1) seat every guest exactly once, using exact names from the list; (2) keep each party at one table, unless a party is larger than any table, then use neighbouring tables; a party of TWO must take one of that table's "together_seats" pairs (seat numbers, 1-based: side by side, or directly across a rectangular table), never diagonal or at opposite ends; larger families sit in a run of neighbouring seats; (3) honour every request: "sit with" means same table (or neighbouring tables if they can't fit together), "keep apart" means different, non-neighbouring tables, and location requests (near the stage, the entrance, the bar, the trees, or any other item or landmark) use the nearby distances and positions above, and match plain words to items loosely ("trees" means the Christmas trees, "the door" the nearest entrance); (4) avoid leaving a guest alone among strangers when it can be helped, spread empty seats so no table is nearly empty, and fill lower-numbered or more central tables first.`,
     allowLayout ? `If ALL guests can't be seated with every party together and every request honoured using the CURRENT TABLES, also propose a NEW table layout for this room that can, then assign seats to it. A new layout must fit the room: every footprint inside the outline, clear of columns, fixed obstacles and doorways, with at least ${Math.max(prefs.gap, 3)}′ aisles. Keep any non-table furniture listed above (stage, bar, etc.) in your new item list at the same place. ${pinnedItems().length ? 'Anything marked "locked" (tables included) stays exactly where it is with its guests: leave it out of your new item list and fit the new items around it. ' : ''} FURNITURE CATALOG:\n${catalogBrief()}` : `Do not change the tables. If a perfect assignment is impossible, give the best one and list what couldn't be met.`,
     useTools ? `Before answering, call check_seating with your full draft (and layout_items if you propose a new layout) and fix every problem it reports; check again after fixing.` : ``,
-    `Reply with ONLY a JSON object: {"feasible": true or false (everyone seated, parties together and all requests met using the CURRENT tables), "summary": one or two plain sentences, "conflicts": [plain sentences about any request or rule your FINAL answer still doesn't meet; empty if none], "layout": null, or when proposing a new table setup {"reason": one plain sentence on why, "items": [items in the catalog format, with tables labelled "1", "2", …]}, "assignments": [{"table": index, "seats": ["exact guest name" or "" for an empty seat, … in seat-number order]}]}. When "layout" is given, table indexes in "assignments" are positions in layout.items; otherwise they are indexes in CURRENT TABLES. Example assignment: {"table":0,"seats":["Ann Lee","Raj Patel","",""]}`
+    `Reply with ONLY a JSON object: {"feasible": true or false (everyone seated, parties together and all requests met using the CURRENT tables), "summary": one or two plain sentences, "conflicts": [plain sentences about any request or rule your FINAL answer still doesn't meet; empty if none], "layout": null, or when proposing a new table setup {"reason": one plain sentence on why, "items": [items in the catalog format, with tables labelled "1", "2", …]}, "assignments": [{"table": "the table's name", "seats": ["exact guest name" or "" for an empty seat, … in seat-number order]}]}. "table" is the table's "name" exactly as listed in CURRENT TABLES, which is the number the planner's user calls it by: a request for "table 4" means the table whose name is "4". When "layout" is given, use the labels you gave the tables in layout.items instead. Example assignment: {"table":"1","seats":["Ann Lee","Raj Patel","",""]}`
   ].filter(Boolean).join('\n\n');
   // the tables a draft refers to: the current ones, or the seated tables of a proposed layout (indexed by item position)
   const draftTables = layoutItems => { if (!layoutItems) return curTables;
-    return layoutItems.map((o, i) => { const it = cleanItem(o); return it && SEATED.has(it.type) ? {name: it.p.label || `item ${i}`, seats: seatCount(it), fixed: [], it} : null; }).map((t, i) => t || {name: `item ${i} (no seats)`, seats: 0, fixed: []}); };
+    return layoutItems.map((o, i) => { const it = cleanItem(o); return it && SEATED.has(it.type) ? {name: String(it.p.label || `item ${i}`), seats: seatCount(it), fixed: [], it} : null; }).map((t, i) => t || {name: `item ${i} (no seats)`, seats: 0, fixed: []}); };
   saCtl = new AbortController(); saBusy(true); $('#saResult').hidden = true; saPlan = null; saStatus(`Working out seats for ${total} guests… this usually takes 30–90 seconds.`, 'busy');
   let checks = 0;
   const tools = useTools ? [{name: 'check_seating', description: 'Checks a full draft seating against the guest list: unseated, duplicate or unknown guests, over-full tables and split parties. With layout_items it also runs the floor planner’s fit checks on that proposed layout. Returns counts and a list of problems.',
     inputSchema: {type: 'object', properties: {assignments: {type: 'array', items: {type: 'object'}}, layout_items: {type: 'array', items: {type: 'object'}}}, required: ['assignments']},
     execute: input => { checks++; saStatus(`Checking the seating (round ${checks})…`, 'busy');
       const li = Array.isArray(input.layout_items) && input.layout_items.length ? input.layout_items.slice(0, 500) : null;
-      const out = checkSeating(parties, draftTables(li), input.assignments); if (li) out.layout_fit = checkDraft(li); return out; }}] : undefined;
+      const dt = draftTables(li), out = checkSeating(parties, dt, resolveTables(dt, input.assignments)); if (li) out.layout_fit = checkDraft(li); return out; }}] : undefined;
   try {
     const res = await sampleFn.json(prompt, {signal: saCtl.signal, ...(tools ? {tools} : {cache: false})});
     const li = allowLayout && res && res.layout && Array.isArray(res.layout.items) && res.layout.items.length ? res.layout.items.slice(0, 500) : null;
-    const asg = res && Array.isArray(res.assignments) ? res.assignments : [];
-    if (!asg.length){ saStatus('That answer had no seat assignments in it. Try again.', 'err'); return; }
-    const tables = draftTables(li); tidyCouples(parties, tables, asg);   // a backstop: fix any couple left diagonal or at opposite ends
+    const tables = draftTables(li), asg = resolveTables(tables, res && res.assignments);
+    if (!asg.length){ saStatus('That answer had no seat assignments in it. Try again.', 'err'); return; } tidyCouples(parties, tables, asg);   // a backstop: fix any couple left diagonal or at opposite ends
     const check = checkSeating(parties, tables, asg);
     saPlan = {parties, keep, layout: li ? {reason: String(res.layout.reason || '').slice(0, 300), items: li} : null, assignments: asg, curIds: cur.map(it => it.id), tables, check,
       feasible: res.feasible !== false && !check.problems.length, summary: String(res.summary || '').slice(0, 400),
@@ -3647,7 +3658,7 @@ function renderSeatPlan(){
   h += `<p class="hint" style="margin:0">${P.check.seated} of ${P.check.guests} guests seated${P.layout ? ` · new setup: ${P.layout.items.length} items` : ''}.</p><div class="sa-tabs">`;
   const emptyT = [...byTable.keys()].filter(ti => !byTable.get(ti).some(Boolean)).length + P.tables.filter((t, i) => t.seats && !byTable.has(i)).length;
   const tagOf = saTagMap(P.parties);
-  [...byTable.keys()].sort((a, b) => a - b).filter(ti => byTable.get(ti).some(Boolean)).forEach(ti => { const t = P.tables[ti], seats = byTable.get(ti).slice(0, t.seats), filled = seats.filter(Boolean).length;
+  [...byTable.keys()].sort((a, b) => String(P.tables[a].name).localeCompare(String(P.tables[b].name), undefined, {numeric: true})).filter(ti => byTable.get(ti).some(Boolean)).forEach(ti => { const t = P.tables[ti], seats = byTable.get(ti).slice(0, t.seats), filled = seats.filter(Boolean).length;
     h += `<div class="sa-tab"><b>Table ${esc(t.name)} · ${filled}/${t.seats}</b><ol>${seats.map(s => s ? `<li>${esc(s)}${(tagOf.get(s.toLowerCase()) || []).map(tagChip).join('')}</li>` : `<li class="empty">open</li>`).join('')}</ol>${tallyHtml(seats.filter(Boolean).map(s => tagOf.get(s.toLowerCase()) || []))}</div>`; });
   h += `</div>${emptyT ? `<p class="hint" style="margin:0">${emptyT} table${emptyT === 1 ? " is" : "s are"} left empty.</p>` : ""}<div class="btnrow">${P.layout ? `<button class="btn primary" id="saApplyLayout">Use the new setup and these seats</button>` : `<button class="btn primary" id="saApply">Apply these seats</button>`}<button class="btn" id="saDiscard">Discard</button></div>
     <p class="hint" style="margin:0">Applying is one step: Undo puts everything back.${P.layout ? ' The new setup replaces the tables on this plan.' : ''}</p>`;
